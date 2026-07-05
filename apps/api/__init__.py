@@ -1,0 +1,1 @@
+"""OmniAlpha FastAPI application."""

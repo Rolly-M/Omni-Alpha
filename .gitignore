@@ -1,0 +1,51 @@
+# Secrets
+.env
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local database (dev)
+omni_alpha.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+logs/
+
+# Reports
+backtest_reports/
+
+# Docker volumes
+postgres_data/

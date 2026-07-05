@@ -1,0 +1,91 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg15
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-omniuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-omnipass}
+      POSTGRES_DB: ${POSTGRES_DB:-omni_alpha}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-omniuser}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-omniuser}:${POSTGRES_PASSWORD:-omnipass}@postgres:5432/${POSTGRES_DB:-omni_alpha}
+      - REDIS_URL=redis://redis:6379/0
+      - MOCK_MODE=true
+      - LIVE_TRADING_ENABLED=false
+      - PYTHONPATH=/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./mock_data:/app/mock_data
+      - ./omni_alpha.db:/app/omni_alpha.db
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: python -m scripts.run_worker
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-omniuser}:${POSTGRES_PASSWORD:-omnipass}@postgres:5432/${POSTGRES_DB:-omni_alpha}
+      - REDIS_URL=redis://redis:6379/0
+      - MOCK_MODE=true
+      - LIVE_TRADING_ENABLED=false
+      - PYTHONPATH=/app
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+    environment:
+      - API_URL=http://api:8000
+      - DEMO_MODE=true
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
