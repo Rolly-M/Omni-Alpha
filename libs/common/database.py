@@ -20,6 +20,10 @@ def _make_engine() -> AsyncEngine:
     kwargs: dict = {"echo": settings.DEBUG}
     if "sqlite" in url:
         kwargs["connect_args"] = {"check_same_thread": False}
+    elif "postgresql" in url or "asyncpg" in url:
+        # Supabase/PgBouncer transaction-mode pooler requires prepared statements disabled.
+        # Safe to set for direct connections too.
+        kwargs["connect_args"] = {"statement_cache_size": 0}
     return create_async_engine(url, **kwargs)
 
 
