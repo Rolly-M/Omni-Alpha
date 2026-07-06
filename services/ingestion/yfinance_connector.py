@@ -21,6 +21,16 @@ _TF_MAP = {"1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "1d": "1d", "1w": "
 _fallback = MockConnector()
 
 
+def _to_yahoo_ticker(symbol: str) -> str:
+    """Map internal symbols to Yahoo tickers (e.g. BTC/USDT → BTC-USD)."""
+    if "/" in symbol:
+        base, quote = symbol.split("/", 1)
+        if quote.upper() in ("USDT", "USDC", "BUSD"):
+            quote = "USD"
+        return f"{base}-{quote}"
+    return symbol
+
+
 class YFinanceConnector(BaseConnector):
     name = "yfinance"
     reliability_score = 0.85
@@ -44,8 +54,7 @@ class YFinanceConnector(BaseConnector):
             interval = _TF_MAP.get(timeframe, "1d")
             period = period_map.get(timeframe, "2y")
 
-            # yfinance uses the raw Yahoo ticker (no "/" for crypto)
-            ticker = symbol.replace("/", "-")
+            ticker = _to_yahoo_ticker(symbol)
             df = yf.download(ticker, period=period, interval=interval, progress=False, auto_adjust=True)
 
             if df.empty:
@@ -65,7 +74,7 @@ class YFinanceConnector(BaseConnector):
     def fetch_news(self, symbol: str, limit: int = 10) -> List[dict]:
         try:
             import yfinance as yf
-            ticker = yf.Ticker(symbol.replace("/", "-"))
+            ticker = yf.Ticker(_to_yahoo_ticker(symbol))
             news = ticker.news or []
             results = []
             for item in news[:limit]:

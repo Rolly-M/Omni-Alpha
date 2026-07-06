@@ -145,3 +145,21 @@ async def trigger_cycle():
             for d in decisions[:10]
         ],
     }
+
+
+# ── Cron endpoints (Vercel crons send GET requests) ──────────────────────────
+@app.get("/api/cron/daily-snapshot", tags=["Cron"], include_in_schema=False)
+async def cron_daily_snapshot():
+    """Record a daily portfolio snapshot — wired to a Vercel cron job."""
+    from apps.api.routers.portfolio import take_snapshot
+    try:
+        return await take_snapshot()
+    except Exception as exc:
+        log.warning("Cron snapshot skipped", error=str(exc))
+        return {"snapshot": False, "reason": str(exc)}
+
+
+@app.get("/api/cron/run-cycle", tags=["Cron"], include_in_schema=False)
+async def cron_run_cycle():
+    """Run the agent analysis cycle — wired to a Vercel cron job."""
+    return await trigger_cycle()

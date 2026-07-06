@@ -12,8 +12,18 @@
       "dest": "/api/index.py"
     }
   ],
+  "crons": [
+    {
+      "path": "/api/cron/daily-snapshot",
+      "schedule": "10 21 * * *"
+    },
+    {
+      "path": "/api/cron/run-cycle",
+      "schedule": "30 14 * * *"
+    }
+  ],
   "env": {
-    "MOCK_MODE": "true",
+    "MOCK_MODE": "false",
     "LIVE_TRADING_ENABLED": "false",
     "MANUAL_APPROVAL_REQUIRED": "true"
   }
