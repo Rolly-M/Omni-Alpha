@@ -42,6 +42,17 @@ class Settings(BaseSettings):
         default=True,
         description="Require human approval before any order is submitted.",
     )
+    AUTO_TRADE_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Execute approved agent decisions automatically. Only takes effect "
+            "when MANUAL_APPROVAL_REQUIRED is also false."
+        ),
+    )
+    MIN_CONFIDENCE_TO_TRADE: float = Field(
+        default=60.0,
+        description="Decisions below this confidence (0-100) are never auto-executed.",
+    )
 
     # ── Portfolio ─────────────────────────────────────────────────────────────
     INITIAL_BALANCE: float = 100_000.0
@@ -74,6 +85,17 @@ class Settings(BaseSettings):
     FRED_API_KEY: Optional[str] = None
     BINANCE_API_KEY: Optional[str] = None
     BINANCE_SECRET_KEY: Optional[str] = None
+
+    # ── Alpaca brokerage (optional) ───────────────────────────────────────────
+    ALPACA_API_KEY: Optional[str] = None
+    ALPACA_SECRET_KEY: Optional[str] = None
+    ALPACA_PAPER: bool = Field(
+        default=True,
+        description=(
+            "Use Alpaca's paper-trading endpoint (fake money, real market). "
+            "Live endpoint additionally requires LIVE_TRADING_ENABLED=true."
+        ),
+    )
 
     # ── Watchlists ───────────────────────────────────────────────────────────
     STOCK_WATCHLIST: List[str] = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META"]

@@ -1,46 +1,114 @@
-"""Order management endpoints."""
+"""Order management endpoints — database-backed order history and the
+manual-approval workflow for agent decisions."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
+from sqlalchemy import select
+
+from libs.common.database import get_db_session
+from libs.common.models.orders import Order
+from libs.common.models.signals import Decision as DecisionRow
 
 router = APIRouter()
 
-# Demo order history
-_DEMO_ORDERS = [
-    {"order_id": "ord-001", "symbol": "AAPL", "side": "BUY", "quantity": 25.0,
-     "order_type": "MARKET", "status": "FILLED", "average_fill_price": 183.40,
-     "commission": 4.59, "slippage": 0.92, "is_paper": True, "filled_at": "2024-12-01T14:32:00Z"},
-    {"order_id": "ord-002", "symbol": "MSFT", "side": "BUY", "quantity": 10.0,
-     "order_type": "MARKET", "status": "FILLED", "average_fill_price": 415.10,
-     "commission": 4.15, "slippage": 0.83, "is_paper": True, "filled_at": "2024-12-02T09:45:00Z"},
-    {"order_id": "ord-003", "symbol": "BTC/USDT", "side": "BUY", "quantity": 0.05,
-     "order_type": "MARKET", "status": "FILLED", "average_fill_price": 67500.0,
-     "commission": 3.38, "slippage": 16.88, "is_paper": True, "filled_at": "2024-12-03T16:20:00Z"},
-    {"order_id": "ord-004", "symbol": "NVDA", "side": "BUY", "quantity": 5.0,
-     "order_type": "MARKET", "status": "PARTIAL_FILL", "average_fill_price": 895.0,
-     "commission": 2.24, "slippage": 1.12, "is_paper": True, "filled_at": "2024-12-04T10:05:00Z"},
-    {"order_id": "ord-005", "symbol": "TSLA", "side": "SELL", "quantity": 15.0,
-     "order_type": "MARKET", "status": "REJECTED", "average_fill_price": None,
-     "commission": 0, "slippage": 0, "is_paper": True,
-     "rejection_reason": "Risk agent veto: elevated volatility (ATR=4.2%)",
-     "filled_at": None},
-]
+
+def _order_to_dict(o: Order) -> dict:
+    return {
+        "order_id": o.id,
+        "decision_id": o.decision_id,
+        "symbol": o.symbol,
+        "asset_class": o.asset_class,
+        "side": o.side,
+        "quantity": o.quantity,
+        "order_type": o.order_type,
+        "status": o.status,
+        "filled_quantity": o.filled_quantity,
+        "average_fill_price": o.average_fill_price,
+        "commission": o.commission,
+        "slippage": o.slippage,
+        "rejection_reason": o.rejection_reason,
+        "is_paper": o.is_paper,
+        "created_at": o.created_at.isoformat() if o.created_at else None,
+        "filled_at": o.filled_at.isoformat() if o.filled_at else None,
+    }
 
 
 @router.get("/history")
 async def get_order_history(
     limit: int = Query(50, ge=1, le=200),
     status: str = Query(None),
+    symbol: str = Query(None),
 ):
-    orders = _DEMO_ORDERS
-    if status:
-        orders = [o for o in orders if o["status"] == status.upper()]
-    return {"orders": orders[:limit], "count": len(orders)}
+    async with get_db_session() as db:
+        query = select(Order).order_by(Order.created_at.desc()).limit(limit)
+        if status:
+            query = query.where(Order.status == status.upper())
+        if symbol:
+            query = query.where(Order.symbol == symbol)
+        result = await db.execute(query)
+        orders = [_order_to_dict(o) for o in result.scalars()]
+        return {"orders": orders, "count": len(orders)}
+
+
+# ── Decision approval workflow ────────────────────────────────────────────────
+@router.get("/decisions/pending")
+async def get_pending_decisions(limit: int = Query(50, ge=1, le=200)):
+    """Actionable agent decisions awaiting manual approval."""
+    async with get_db_session() as db:
+        result = await db.execute(
+            select(DecisionRow)
+            .where(DecisionRow.status == "PENDING")
+            .order_by(DecisionRow.created_at.desc())
+            .limit(limit)
+        )
+        rows = [
+            {
+                "decision_id": r.id,
+                "symbol": r.symbol,
+                "action": r.action,
+                "asset_class": r.asset_class,
+                "entry_price": r.entry_price,
+                "stop_loss": r.stop_loss,
+                "take_profit": r.take_profit,
+                "position_size_pct": round(r.position_size_pct * 100, 2),
+                "confidence": round(r.confidence, 1),
+                "risk_verdict": r.risk_verdict,
+                "thesis": r.thesis,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in result.scalars()
+        ]
+        return {"pending": rows, "count": len(rows),
+                "hint": "POST /api/orders/decisions/{decision_id}/execute to approve"}
+
+
+@router.post("/decisions/{decision_id}/execute")
+async def execute_decision(decision_id: str):
+    """Approve and execute a pending agent decision."""
+    from services.execution.trade_executor import execute_decision_by_id
+    result = await execute_decision_by_id(decision_id)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@router.post("/decisions/{decision_id}/dismiss")
+async def dismiss_decision(decision_id: str):
+    """Dismiss a pending decision without executing it."""
+    async with get_db_session() as db:
+        row = await db.get(DecisionRow, decision_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Decision not found")
+        if row.status != "PENDING":
+            raise HTTPException(status_code=400, detail=f"Status is '{row.status}', expected PENDING")
+        row.status = "DISMISSED"
+        return {"decision_id": decision_id, "status": "DISMISSED"}
 
 
 @router.get("/{order_id}")
 async def get_order(order_id: str):
-    for o in _DEMO_ORDERS:
-        if o["order_id"] == order_id:
-            return o
-    return {"error": "Order not found"}
+    async with get_db_session() as db:
+        order = await db.get(Order, order_id)
+        if order is None:
+            raise HTTPException(status_code=404, detail="Order not found")
+        return _order_to_dict(order)

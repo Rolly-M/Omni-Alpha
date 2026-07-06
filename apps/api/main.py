@@ -132,11 +132,17 @@ async def kill_switch_status():
 
 @app.post("/api/control/run-cycle", tags=["Control"])
 async def trigger_cycle():
-    """Manually trigger a full analysis cycle."""
+    """Run a full analysis cycle, persist decisions, and execute approved
+    trades automatically when AUTO_TRADE_ENABLED=true and
+    MANUAL_APPROVAL_REQUIRED=false. Otherwise decisions are stored as
+    PENDING for manual approval via /api/orders/decisions/pending."""
     from services.agents.coordinator import get_coordinator
+    from services.execution.trade_executor import process_decisions
+
     coordinator = get_coordinator()
     loop = asyncio.get_event_loop()
     decisions = await loop.run_in_executor(None, coordinator.run_cycle)
+    execution = await process_decisions(decisions)
     return {
         "cycle_ran": True,
         "decisions": len(decisions),
@@ -144,6 +150,7 @@ async def trigger_cycle():
             {"symbol": d.symbol, "action": d.action, "confidence": round(d.confidence, 1)}
             for d in decisions[:10]
         ],
+        "execution": execution,
     }
 
 
